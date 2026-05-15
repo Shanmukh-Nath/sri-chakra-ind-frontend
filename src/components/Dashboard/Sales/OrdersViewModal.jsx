@@ -25,8 +25,19 @@ function OrdersViewModal({ order }) {
       try {
         setLoading(true);
         const res = await axiosAPI.get(`/sales-orders/order/${order.id}`);
-        // console.log(res);
-        setOrderdata(res.data);
+        const raw = res.data;
+        const orderRoot = raw?.order || raw?.salesOrder;
+        const normalized = orderRoot
+          ? {
+              ...orderRoot,
+              items:
+                raw?.items ??
+                orderRoot?.items ??
+                raw?.salesOrderItems ??
+                [],
+            }
+          : raw;
+        setOrderdata(normalized);
       } catch (e) {
         // console.log(e);
         setError(e.response.data.message);

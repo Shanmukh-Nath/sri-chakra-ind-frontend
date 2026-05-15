@@ -168,6 +168,12 @@ function ProductHome({ navigate, isAdmin }) {
           >
             Taxes
           </button>
+          <button
+            className="homebtn"
+            onClick={() => navigate("/coils")}
+          >
+            Coils
+          </button>
         </div>
       </div>
 

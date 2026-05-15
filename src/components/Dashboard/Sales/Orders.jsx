@@ -367,26 +367,81 @@ function Orders({
     return total;
   };
 
-  // Quantity
+  const getOrderItems = (order) => {
+    if (!order) return [];
+    const items =
+      order.items ?? order.salesOrderItems ?? order.orderItems ?? [];
+    return Array.isArray(items) ? items : [];
+  };
+
+  const formatOrderCoilNumbers = (order) => {
+    const values = getOrderItems(order)
+      .map((item) =>
+        item?.coilNumber != null ? String(item.coilNumber).trim() : "",
+      )
+      .filter(Boolean);
+    const unique = [...new Set(values)];
+    return unique.length ? unique.join(", ") : "—";
+  };
+
+  const formatOrderCoilSheets = (order) => {
+    const values = getOrderItems(order)
+      .map((item) =>
+        item?.coilSheet != null ? String(item.coilSheet).trim() : "",
+      )
+      .filter(Boolean);
+    const unique = [...new Set(values)];
+    return unique.length ? unique.join(", ") : "—";
+  };
+
+  const parseItemQuantity = (item) => {
+    const raw = item?.quantity ?? item?.qty ?? item?.orderedQuantity;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const getItemProductMeta = (item) => ({
+    productType: item?.product?.productType ?? item?.productType,
+    packageWeight:
+      Number(item?.product?.packageWeight ?? item?.packageWeight) || 0,
+    unit: String(item?.unit ?? item?.product?.unit ?? "").toLowerCase(),
+  });
+
+  // Quantity (tons) — supports string quantities and flat item fields from API
   const Qty = (items) => {
-    if (!Array.isArray(items)) return 0; // Safeguard for undefined or non-array
+    if (!Array.isArray(items)) return 0;
     let kgs = 0;
+
     for (const item of items) {
-      if (item?.product?.productType === "packed") {
-        if (item?.unit === "kg") {
-          kgs += item.quantity * item?.product?.packageWeight;
-        } else if (item?.unit === "tons") {
-          kgs += (item.quantity * item?.product?.packageWeight) / 1000;
+      const qty = parseItemQuantity(item);
+      if (qty <= 0) continue;
+
+      const { productType, packageWeight, unit } = getItemProductMeta(item);
+
+      if (productType === "packed") {
+        if (unit === "kg" && packageWeight > 0) {
+          kgs += qty * packageWeight;
+        } else if ((unit === "tons" || unit === "ton") && packageWeight > 0) {
+          kgs += (qty * packageWeight) / 1000;
+        } else if (packageWeight > 0) {
+          kgs += qty * packageWeight;
         }
-      } else if (item?.product?.productType === "loose") {
-        if (item?.unit === "kg") {
-          kgs += item.quantity;
-        } else if (item?.unit === "tons") {
-          kgs += item.quantity / 1000;
+      } else if (productType === "loose") {
+        if (unit === "kg") {
+          kgs += qty;
+        } else if (unit === "tons" || unit === "ton") {
+          kgs += qty / 1000;
         }
+      } else if (unit === "tons" || unit === "ton") {
+        kgs += qty * 1000;
+      } else if (unit === "kg") {
+        kgs += qty;
       }
     }
-    return kgs / 1000;
+
+    if (kgs > 0) return kgs / 1000;
+
+    return items.reduce((sum, item) => sum + parseItemQuantity(item), 0);
   };
 
   // Apply table header search filters to a given orders array
@@ -531,28 +586,21 @@ function Orders({
         }
       }
 
+      const orderItems = getOrderItems(order);
+
       // Tons
-      totalTons += Qty(order?.items) || 0;
+      totalTons += Qty(orderItems) || 0;
 
       // Bags (only for packed products)
-      if (Array.isArray(order?.items)) {
-        for (const item of order.items) {
-          const productType = item?.product?.productType;
-          const unit = item?.unit;
-          const packageWeight = item?.product?.packageWeight || 0; // in kg
+      for (const item of orderItems) {
+        const { productType, packageWeight, unit } = getItemProductMeta(item);
+        const qty = parseItemQuantity(item);
 
-          if (productType === "packed") {
-            if (unit === "kg") {
-              // Treat quantity as number of bags when unit is 'kg'
-              totalBags += Number(item?.quantity) || 0;
-            } else if (unit === "tons") {
-              // Convert tons to bags using package weight (kg per bag)
-              if (packageWeight > 0) {
-                const bags =
-                  ((Number(item?.quantity) || 0) * 1000) / packageWeight;
-                totalBags += bags;
-              }
-            }
+        if (productType === "packed") {
+          if (unit === "kg") {
+            totalBags += qty;
+          } else if ((unit === "tons" || unit === "ton") && packageWeight > 0) {
+            totalBags += (qty * 1000) / packageWeight;
           }
         }
       }
@@ -618,6 +666,8 @@ function Orders({
       "Customer Name",
       "Firm Name",
       "Qty",
+      "Coil No.",
+      "Coil Sheet",
       "TNX Amount",
       "Payment Mode",
       "Status",
@@ -640,7 +690,9 @@ function Orders({
           "Customer Name": order.customer?.name,
           "Firm Name":
             order.customer?.firmName || order.customer?.firm_name || "N/A",
-          Qty: `${Qty(order.items)} Tons`,
+          Qty: `${Qty(getOrderItems(order))} Tons`,
+          "Coil No.": formatOrderCoilNumbers(order),
+          "Coil Sheet": formatOrderCoilSheets(order),
           "TNX Amount": order.totalAmount,
           "Payment Mode": "UPI",
           Status: order.orderStatus,
@@ -1225,6 +1277,8 @@ function Orders({
                   </th>
 
                   <th>Qunatity</th>
+                  <th>Coil No.</th>
+                  <th>Coil Sheet</th>
                   <th>TNX Amount</th>
 
                   <th>Status</th>
@@ -1238,7 +1292,7 @@ function Orders({
                   paymentModeSearchTerm) && (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={15}
                       style={{
                         textAlign: "center",
                         fontStyle: "italic",
@@ -1412,7 +1466,7 @@ function Orders({
                   if (filteredOrders.length === 0) {
                     return (
                       <tr>
-                        <td colSpan={10}>NO DATA FOUND</td>
+                        <td colSpan={15}>NO DATA FOUND</td>
                       </tr>
                     );
                   }
@@ -1439,7 +1493,9 @@ function Orders({
 
                       <td>{order.customer?.name}</td>
 
-                      <td>{Qty(order.items)} Tons</td>
+                      <td>{Qty(getOrderItems(order))} Tons</td>
+                      <td>{formatOrderCoilNumbers(order)}</td>
+                      <td>{formatOrderCoilSheets(order)}</td>
                       <td>{order.totalAmount}</td>
 
                       <td

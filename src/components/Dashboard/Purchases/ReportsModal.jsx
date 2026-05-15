@@ -21,6 +21,14 @@ function getDamageColor(damagePercent) {
   return "inherit";
 }
 
+function formatCoilDisplay(item) {
+  const num = item?.coilNumber != null ? String(item.coilNumber).trim() : "";
+  const sheet = item?.coilSheet != null ? String(item.coilSheet).trim() : "";
+  if (!num && !sheet) return "—";
+  if (num && sheet) return `${num} (${sheet})`;
+  return num || sheet;
+}
+
 function ReportsModal({
   pdetails,
   warehouses,
@@ -474,6 +482,7 @@ function ReportsModal({
                 <th>Product ID</th>
                 <th>Product Name</th>
                 <th>Units</th>
+                <th>Coil no.</th>
                 <th>Quantity</th>
                 <th>Net Amount</th>
               </tr>
@@ -484,7 +493,12 @@ function ReportsModal({
                   <td>{idx + 1}</td>
                   <td>{item.SKU}</td>
                   <td>{item.name}</td>
-                  <td>{item.type === "packed" ? "packets" : item.unit}</td>
+                  <td>
+                    {item.productType === "packed" || item.type === "packed"
+                      ? "packets"
+                      : item.unit}
+                  </td>
+                  <td>{formatCoilDisplay(item)}</td>
                   <td>{item.quantity}</td>
                   <td>{item.totalAmount}</td>
                 </tr>
