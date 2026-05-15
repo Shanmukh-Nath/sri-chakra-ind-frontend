@@ -33,6 +33,9 @@ const PaymentRoutes = lazy(() => import("./Payments/PaymentRoutes"));
 const EmployeeRoutes = lazy(() => import("./Employees/EmployeeRoutes"));
 const WarehouseRoutes = lazy(() => import("./Warehouses/WarehouseRoutes"));
 const ProductRoutes = lazy(() => import("./Products/ProductRoutes"));
+const Coils = lazy(() => import("./Products/Coils"));
+const ViewCoils = lazy(() => import("./Products/ViewCoils"));
+const EditCoilBatch = lazy(() => import("./Products/EditCoilBatch"));
 const SampleRoutes = lazy(() => import("./Samples/SampleRoutes"));
 const LocationsHome = lazy(() => import("./Locations/LocationsHome"));
 const InvoiceRoutes = lazy(() => import("./Invoice/InvoiceRoutes"));
@@ -342,6 +345,30 @@ export default function Dashboard({
                   element={
                     <Suspense fallback={<RouteSkeleton />}>
                       <ProductRoutes />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/coils/view"
+                  element={
+                    <Suspense fallback={<RouteSkeleton />}>
+                      <ViewCoils />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/coils/edit/:batchId"
+                  element={
+                    <Suspense fallback={<RouteSkeleton />}>
+                      <EditCoilBatch />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/coils"
+                  element={
+                    <Suspense fallback={<RouteSkeleton />}>
+                      <Coils />
                     </Suspense>
                   }
                 />

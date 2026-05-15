@@ -7,6 +7,72 @@ import LoadingAnimation from "@/components/LoadingAnimation";
 import success from "../../../images/animations/SuccessAnimation.gif";
 import CustomSearchDropdown from "@/utils/CustomSearchDropDown";
 
+function divisionQueryParams() {
+  const currentDivisionId = localStorage.getItem("currentDivisionId");
+  if (currentDivisionId && currentDivisionId !== "1") {
+    return { divisionId: currentDivisionId };
+  }
+  if (currentDivisionId === "1") {
+    return { showAllDivisions: "true" };
+  }
+  return {};
+}
+
+const COIL_KEY_SEP = "\x1f";
+
+function coilEntryKey(e) {
+  return `${e.productId}${COIL_KEY_SEP}${e.coilNumber}${COIL_KEY_SEP}${e.coilSheet || ""}`;
+}
+
+/** Flatten coil line items from GET /coils list response for dropdowns keyed by productId */
+function flattenCoilItemsFromCoilsResponse(resData) {
+  const batches = Array.isArray(resData?.data) ? resData.data : [];
+  const entries = [];
+  for (const batch of batches) {
+    const coils = Array.isArray(batch?.coils) ? batch.coils : [];
+    for (const coil of coils) {
+      const items = Array.isArray(coil?.items) ? coil.items : [];
+      for (const it of items) {
+        const pid = it.productId;
+        if (pid == null) continue;
+        const cn = String(it.coilNumber ?? "").trim();
+        if (!cn) continue;
+        entries.push({
+          productId: pid,
+          coilNumber: cn,
+          coilSheet: it.coilSheet != null ? String(it.coilSheet) : "",
+        });
+      }
+    }
+    const flat = Array.isArray(batch?.items) ? batch.items : [];
+    for (const it of flat) {
+      const pid = it.productId;
+      if (pid == null) continue;
+      const cn = String(it.coilNumber ?? "").trim();
+      if (!cn) continue;
+      entries.push({
+        productId: pid,
+        coilNumber: cn,
+        coilSheet: it.coilSheet != null ? String(it.coilSheet) : "",
+      });
+    }
+  }
+  const seen = new Set();
+  const unique = [];
+  for (const e of entries) {
+    const k = `${e.productId}::${e.coilNumber}::${e.coilSheet}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    unique.push(e);
+  }
+  unique.sort((a, b) =>
+    String(a.coilNumber).localeCompare(String(b.coilNumber), undefined, {
+      numeric: true,
+    }),
+  );
+  return unique;
+}
+
 function NewPurchase({ navigate }) {
   const [products, setProducts] = useState([]);
   const [availableProducts, setAvailableProducts] = useState([]);
@@ -25,6 +91,8 @@ function NewPurchase({ navigate }) {
   const [currentDate, setCurrentDate] = useState("");
   const [currentTime, setCurrentTime] = useState("");
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedCoilPickKey, setSelectedCoilPickKey] = useState("");
+  const [coilCatalog, setCoilCatalog] = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState();
@@ -57,32 +125,33 @@ function NewPurchase({ navigate }) {
         let suppliersEndpoint = "/suppliers";
         let productsEndpoint = "/products/list";
         
-        if (currentDivisionId && currentDivisionId !== '1') {
+        if (currentDivisionId && currentDivisionId !== "1") {
           warehousesEndpoint += `?divisionId=${currentDivisionId}`;
           suppliersEndpoint += `?divisionId=${currentDivisionId}`;
           productsEndpoint += `?divisionId=${currentDivisionId}`;
-        } else if (currentDivisionId === '1') {
+        } else if (currentDivisionId === "1") {
           warehousesEndpoint += `?showAllDivisions=true`;
           suppliersEndpoint += `?showAllDivisions=true`;
           productsEndpoint += `?showAllDivisions=true`;
         }
-        
-        console.log('NewPurchase - Fetching data with endpoints:');
-        console.log('NewPurchase - Warehouses:', warehousesEndpoint);
-        console.log('NewPurchase - Suppliers:', suppliersEndpoint);
-        console.log('NewPurchase - Products:', productsEndpoint);
-        console.log('NewPurchase - Division ID:', currentDivisionId);
-        console.log('NewPurchase - Division Name:', currentDivisionName);
-        
-        const [w, s, p] = await Promise.all([
+
+        const coilsParams = {
+          limit: 200,
+          offset: 0,
+          ...divisionQueryParams(),
+        };
+
+        const [w, s, p, cRes] = await Promise.all([
           axiosAPI.get(warehousesEndpoint),
           axiosAPI.get(suppliersEndpoint),
           axiosAPI.get(productsEndpoint),
+          axiosAPI.get("/coils", coilsParams).catch(() => ({ data: {} })),
         ]);
         setWarehouses(w.data.warehouses);
         setSuppliers(s.data.suppliers);
         setApiproducts(p.data.products);
         setAvailableProducts(p.data.products);
+        setCoilCatalog(flattenCoilItemsFromCoilsResponse(cRes.data || {}));
       } catch (e) {
         setError(e.response?.data?.message || "Error loading data");
         setIsModalOpen(true);
@@ -109,16 +178,26 @@ function NewPurchase({ navigate }) {
     return { breakdown, totalTax };
   };
 
+  const coilOptionsForProductId = (productId) =>
+    coilCatalog.filter(
+      (e) => String(e.productId) === String(productId),
+    );
+
   const handleAddProduct = () => {
     const errs = {};
     if (!selectedSKU) errs.sku = true;
     if (!qty || qty <= 0) errs.qty = true;
+    const prod = apiproducts.find((p) => p.SKU === selectedSKU);
+    const coilOpts = prod ? coilOptionsForProductId(prod.id) : [];
+    if (coilOpts.length > 0 && !String(selectedCoilPickKey).trim()) {
+      errs.coil = true;
+    }
     if (Object.keys(errs).length) {
       setErrors(errs);
       return;
     }
 
-    const prod = apiproducts.find((p) => p.SKU === selectedSKU);
+    if (!prod) return;
     const purchasePrice = parseFloat(prod.purchasePrice);
     const quantity = parseInt(qty);
 
@@ -129,12 +208,20 @@ function NewPurchase({ navigate }) {
     const finalPrice = purchasePrice + totalTax;
     const total = finalPrice * quantity;
 
+    const coilEntry =
+      coilOpts.length > 0
+        ? coilOpts.find((e) => coilEntryKey(e) === selectedCoilPickKey)
+        : null;
+
     const newItem = {
       ...prod,
       quantity,
       taxBreakdown: breakdown,
       totalTax,
       amount: total,
+      coilPickKey: coilEntry ? coilEntryKey(coilEntry) : "",
+      coilNumber: coilEntry ? coilEntry.coilNumber : null,
+      coilSheet: coilEntry ? coilEntry.coilSheet : "",
     };
 
     setProducts((prev) => [...prev, newItem]);
@@ -142,6 +229,7 @@ function NewPurchase({ navigate }) {
     setSelectedSKU("");
     setQty("");
     setSelectedProduct(null);
+    setSelectedCoilPickKey("");
     setErrors({});
   };
 
@@ -173,11 +261,34 @@ function NewPurchase({ navigate }) {
       return;
     }
 
-    const items = products.map((p) => ({
-      productId: p.id,
-      quantity: p.quantity,
-      purchasePrice: p.purchasePrice,
-    }));
+    const missingCoil = products.some((p) => {
+      const opts = coilOptionsForProductId(p.id);
+      return (
+        opts.length > 0 &&
+        (!String(p.coilPickKey || "").trim() ||
+          !String(p.coilNumber || "").trim())
+      );
+    });
+    if (missingCoil) {
+      setError("Select a coil number for every product that has coils.");
+      setIsModalOpen(true);
+      return;
+    }
+
+    const items = products.map((p) => {
+      const row = {
+        productId: p.id,
+        quantity: p.quantity,
+        purchasePrice: p.purchasePrice,
+      };
+      if (p.coilNumber != null && String(p.coilNumber).trim() !== "") {
+        row.coilNumber = String(p.coilNumber).trim();
+      }
+      if (p.coilSheet != null && String(p.coilSheet).trim() !== "") {
+        row.coilSheet = String(p.coilSheet).trim();
+      }
+      return row;
+    });
 
     try {
       setLoading(true);
@@ -200,8 +311,28 @@ function NewPurchase({ navigate }) {
   const onProductSelect = (e) => {
     const sku = e.target.value;
     setSelectedSKU(sku);
+    setSelectedCoilPickKey("");
     const prod = apiproducts.find((p) => p.SKU === sku);
     setSelectedProduct(prod);
+  };
+
+  const updateLineCoilPick = (sku, pickKey) => {
+    const prod = products.find((p) => p.SKU === sku);
+    if (!prod) return;
+    const opts = coilOptionsForProductId(prod.id);
+    const entry = opts.find((e) => coilEntryKey(e) === pickKey) || null;
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.SKU === sku
+          ? {
+              ...p,
+              coilPickKey: pickKey || "",
+              coilNumber: entry ? entry.coilNumber : null,
+              coilSheet: entry ? entry.coilSheet : "",
+            }
+          : p,
+      ),
+    );
   };
 
   return (
@@ -257,6 +388,7 @@ function NewPurchase({ navigate }) {
                     <th>SKU</th>
                     <th>Name</th>
                     <th>Unit</th>
+                    <th>Coil no.</th>
                     <th>Qty</th>
                     <th>Unit Price</th>
                     <th>Taxes</th>
@@ -265,33 +397,64 @@ function NewPurchase({ navigate }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {products.map((p, i) => (
-                    <tr key={p.SKU}>
-                      <td>{i + 1}</td>
-                      <td>{p.SKU}</td>
-                      <td>{p.name}</td>
-                     <td>
-                      {p.productType === "packed"
-                        ? `packets (${p.packageWeight} ${p.packageWeightUnit})`
-                        : p.unit}
-                    </td>
-                      <td>{p.quantity}</td>
-                      <td>₹{parseFloat(p.purchasePrice).toFixed(2)}</td>
-                      <td>
-                        {Object.entries(p.taxBreakdown).map(([name, amt]) => (
-                          <div key={name}>
-                            {name}: ₹{amt.toFixed(2)}
-                          </div>
-                        ))}
-                      </td>
-                      <td>₹{p.amount.toFixed(2)}</td>
-                      <td>
-                        <button className={styles.removebtn} onClick={() => handleDeleteProduct(p.SKU)}>
-                          <i className="bi bi-trash3"></i>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {products.map((p, i) => {
+                    const lineCoils = coilOptionsForProductId(p.id);
+                    return (
+                      <tr key={p.SKU}>
+                        <td>{i + 1}</td>
+                        <td>{p.SKU}</td>
+                        <td>{p.name}</td>
+                        <td>
+                          {p.productType === "packed"
+                            ? `packets (${p.packageWeight} ${p.packageWeightUnit})`
+                            : p.unit}
+                        </td>
+                        <td>
+                          {lineCoils.length > 0 ? (
+                            <select
+                              className="w-100"
+                              value={p.coilPickKey ?? ""}
+                              onChange={(e) =>
+                                updateLineCoilPick(p.SKU, e.target.value)
+                              }
+                            >
+                              <option value="">-- select coil --</option>
+                              {lineCoils.map((c) => (
+                                <option key={coilEntryKey(c)} value={coilEntryKey(c)}>
+                                  {c.coilNumber}
+                                  {c.coilSheet
+                                    ? ` (${c.coilSheet})`
+                                    : ""}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="text-muted small">
+                              {p.coilNumber || "—"}
+                            </span>
+                          )}
+                        </td>
+                        <td>{p.quantity}</td>
+                        <td>₹{parseFloat(p.purchasePrice).toFixed(2)}</td>
+                        <td>
+                          {Object.entries(p.taxBreakdown).map(([name, amt]) => (
+                            <div key={name}>
+                              {name}: ₹{amt.toFixed(2)}
+                            </div>
+                          ))}
+                        </td>
+                        <td>₹{p.amount.toFixed(2)}</td>
+                        <td>
+                          <button
+                            className={styles.removebtn}
+                            onClick={() => handleDeleteProduct(p.SKU)}
+                          >
+                            <i className="bi bi-trash3"></i>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {/* Add Product Row */}
                   <tr className={styles.tableform}>
                     <td>#</td>
@@ -310,8 +473,41 @@ function NewPurchase({ navigate }) {
                       </select>
                     </td>
                     <td>{selectedProduct?.unit}</td>
-
-                    <td colSpan={1}>
+                    <td>
+                      {selectedProduct &&
+                      coilOptionsForProductId(selectedProduct.id).length >
+                        0 ? (
+                        <select
+                          value={selectedCoilPickKey}
+                          onChange={(e) =>
+                            setSelectedCoilPickKey(e.target.value)
+                          }
+                          className={
+                            errors.coil ? styles.errorinput : ""
+                          }
+                        >
+                          <option value="">-- select coil --</option>
+                          {coilOptionsForProductId(selectedProduct.id).map(
+                            (c) => (
+                              <option
+                                key={coilEntryKey(c)}
+                                value={coilEntryKey(c)}
+                              >
+                                {c.coilNumber}
+                                {c.coilSheet ? ` (${c.coilSheet})` : ""}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                      ) : (
+                        <span className="text-muted small">
+                          {selectedProduct
+                            ? "No coils for product"
+                            : "—"}
+                        </span>
+                      )}
+                    </td>
+                    <td>
                       <input
                         type="number"
                         min="1"
@@ -329,7 +525,8 @@ function NewPurchase({ navigate }) {
                         </div>
                       ))}
                     </td>
-                    <td colSpan={2}>
+                    <td>—</td>
+                    <td>
                       <button
                         className={styles.addbtn}
                         onClick={handleAddProduct}

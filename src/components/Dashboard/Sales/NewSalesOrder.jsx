@@ -48,6 +48,71 @@ const fillUrl = (url, replacements) =>
     url,
   );
 
+function divisionQueryParams() {
+  const currentDivisionId = localStorage.getItem("currentDivisionId");
+  if (currentDivisionId && currentDivisionId !== "1") {
+    return { divisionId: currentDivisionId };
+  }
+  if (currentDivisionId === "1") {
+    return { showAllDivisions: "true" };
+  }
+  return {};
+}
+
+const COIL_KEY_SEP = "\x1f";
+
+function coilEntryKey(e) {
+  return `${e.productId}${COIL_KEY_SEP}${e.coilNumber}${COIL_KEY_SEP}${e.coilSheet || ""}`;
+}
+
+function flattenCoilItemsFromCoilsResponse(resData) {
+  const batches = Array.isArray(resData?.data) ? resData.data : [];
+  const entries = [];
+  for (const batch of batches) {
+    const coils = Array.isArray(batch?.coils) ? batch.coils : [];
+    for (const coil of coils) {
+      const items = Array.isArray(coil?.items) ? coil.items : [];
+      for (const it of items) {
+        const pid = it.productId;
+        if (pid == null) continue;
+        const cn = String(it.coilNumber ?? "").trim();
+        if (!cn) continue;
+        entries.push({
+          productId: pid,
+          coilNumber: cn,
+          coilSheet: it.coilSheet != null ? String(it.coilSheet) : "",
+        });
+      }
+    }
+    const flat = Array.isArray(batch?.items) ? batch.items : [];
+    for (const it of flat) {
+      const pid = it.productId;
+      if (pid == null) continue;
+      const cn = String(it.coilNumber ?? "").trim();
+      if (!cn) continue;
+      entries.push({
+        productId: pid,
+        coilNumber: cn,
+        coilSheet: it.coilSheet != null ? String(it.coilSheet) : "",
+      });
+    }
+  }
+  const seen = new Set();
+  const unique = [];
+  for (const e of entries) {
+    const k = coilEntryKey(e);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    unique.push(e);
+  }
+  unique.sort((a, b) =>
+    String(a.coilNumber).localeCompare(String(b.coilNumber), undefined, {
+      numeric: true,
+    }),
+  );
+  return unique;
+}
+
 export const formatINR = (amount) =>
   Number(amount || 0).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
@@ -800,25 +865,32 @@ const QuantityModal = ({
   setInputQuantity,
   inputQuantity,
   handleQuantityConfirm,
+  getCoilOptionsForProduct,
 }) => {
   const [customUnitPrice, setCustomUnitPrice] = React.useState("");
   const [selectedUnit, setSelectedUnit] = React.useState("");
+  const [selectedCoilPickKey, setSelectedCoilPickKey] = React.useState("");
 
   // ✅ RMT states
   const [rmtFactor, setRmtFactor] = React.useState("");
   const [rmtUnit, setRmtUnit] = React.useState("cm");
 
+  const coilOptions = selectedProductForQty
+    ? getCoilOptionsForProduct(selectedProductForQty.id)
+    : [];
+
   React.useEffect(() => {
-    if (selectedProductForQty?.unitPrices?.length) {
+    if (!selectedProductForQty) return;
+    setSelectedCoilPickKey("");
+    setCustomUnitPrice("");
+    setRmtFactor("");
+    setRmtUnit("cm");
+    setInputQuantity("");
+    if (selectedProductForQty.unitPrices?.length) {
       const defaultUnit =
         selectedProductForQty.unitPrices.find((u) => u.isDefault)?.unit ||
         selectedProductForQty.unitPrices[0]?.unit;
-
       setSelectedUnit(defaultUnit);
-      setCustomUnitPrice("");
-      setRmtFactor("");
-      setRmtUnit("cm");
-      setInputQuantity("");
     }
   }, [selectedProductForQty, setInputQuantity]);
 
@@ -878,6 +950,7 @@ const QuantityModal = ({
           setInputQuantity("");
           setCustomUnitPrice("");
           setRmtFactor("");
+          setSelectedCoilPickKey("");
         }
       }}
     >
@@ -925,6 +998,34 @@ const QuantityModal = ({
               ₹{baseUnitPrice} per{" "}
               {selectedUnit === "rmt" ? "running meter" : selectedUnit}
             </div>
+          </div>
+
+          <div style={{ marginBottom: "12px" }}>
+            <label>
+              Coil no.{" "}
+              {coilOptions.length > 0 && (
+                <span style={{ color: "#c53030" }}>*</span>
+              )}
+            </label>
+            {coilOptions.length > 0 ? (
+              <select
+                value={selectedCoilPickKey}
+                onChange={(e) => setSelectedCoilPickKey(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">-- select coil --</option>
+                {coilOptions.map((c) => (
+                  <option key={coilEntryKey(c)} value={coilEntryKey(c)}>
+                    {c.coilNumber}
+                    {c.coilSheet ? ` (${c.coilSheet})` : ""}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div style={{ fontSize: "13px", color: "#718096" }}>
+                No coils registered for this product
+              </div>
+            )}
           </div>
 
           {/* UNIT */}
@@ -1060,6 +1161,7 @@ const QuantityModal = ({
               setInputQuantity("");
               setCustomUnitPrice("");
               setRmtFactor("");
+              setSelectedCoilPickKey("");
             }}
           >
             Cancel
@@ -1069,9 +1171,14 @@ const QuantityModal = ({
             disabled={
               !quantity ||
               quantity <= 0 ||
-              (selectedUnit === "rmt" && !rmtFactor)
+              (selectedUnit === "rmt" && !rmtFactor) ||
+              (coilOptions.length > 0 && !selectedCoilPickKey)
             }
-            onClick={() =>
+            onClick={() => {
+              const coilEntry =
+                coilOptions.find(
+                  (c) => coilEntryKey(c) === selectedCoilPickKey,
+                ) || null;
               handleQuantityConfirm({
                 quantity,
                 unit: selectedUnit,
@@ -1079,8 +1186,10 @@ const QuantityModal = ({
                   customUnitPrice !== "" ? Number(customUnitPrice) : null,
                 rmtFactor: selectedUnit === "rmt" ? Number(rmtFactor) : null,
                 rmtUnit: selectedUnit === "rmt" ? rmtUnit : null,
-              })
-            }
+                coilNumber: coilEntry?.coilNumber ?? null,
+                coilSheet: coilEntry?.coilSheet ?? null,
+              });
+            }}
             style={{
               backgroundColor: "#003176",
               color: "white",
@@ -1178,6 +1287,7 @@ export default function SalesOrderWizard() {
   const [inputQuantity, setInputQuantity] = useState("");
   const [showQuantityModal, setShowQuantityModal] = useState(false);
   const [loadingProductIds, setLoadingProductIds] = useState(new Set());
+  const [coilCatalog, setCoilCatalog] = useState([]);
 
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [creatingCustomer, setCreatingCustomer] = useState(false);
@@ -1663,6 +1773,34 @@ export default function SalesOrderWizard() {
     fetchCustomerDetails();
   }, [selectedCustomer]);
 
+  useEffect(() => {
+    if (!selectedCustomer) {
+      setCoilCatalog([]);
+      return;
+    }
+    async function loadCoils() {
+      try {
+        const res = await axiosAPI.get("/coils", {
+          limit: 200,
+          offset: 0,
+          ...divisionQueryParams(),
+        });
+        setCoilCatalog(flattenCoilItemsFromCoilsResponse(res.data || {}));
+      } catch {
+        setCoilCatalog([]);
+      }
+    }
+    loadCoils();
+  }, [selectedCustomer, axiosAPI]);
+
+  const getCoilOptionsForProduct = useCallback(
+    (productId) =>
+      coilCatalog.filter(
+        (e) => String(e.productId) === String(productId),
+      ),
+    [coilCatalog],
+  );
+
   // === Step 2: Load Products based on customer's warehouse, initialize cart ===
   // Note: Products are now loaded from customer details API response in the customer step
   // This useEffect is removed to prevent unnecessary API calls in customer step
@@ -1685,6 +1823,8 @@ export default function SalesOrderWizard() {
     priceOverrideReason = null,
     rmtFactor = null,
     rmtUnit = null,
+    coilNumber = null,
+    coilSheet = null,
   ) {
     if (!customerDetails) return;
     const isNewCart = !cartId;
@@ -1729,6 +1869,14 @@ export default function SalesOrderWizard() {
               customUnitPrice !== null && customUnitPrice !== ""
                 ? priceOverrideReason || "Manual price override from cart UI"
                 : null,
+            ...(coilNumber != null && String(coilNumber).trim() !== ""
+              ? {
+                  coilNumber: String(coilNumber).trim(),
+                  ...(coilSheet != null && String(coilSheet).trim() !== ""
+                    ? { coilSheet: String(coilSheet).trim() }
+                    : {}),
+                }
+              : {}),
             allowOutOfStock: true,
             allowBackorder: true,
           },
@@ -1848,6 +1996,8 @@ export default function SalesOrderWizard() {
     unit,
     rmtFactor = null,
     rmtUnit = null,
+    coilNumber = null,
+    coilSheet = null,
   }) {
     if (!selectedProductForQty || quantity <= 0) return;
 
@@ -1861,6 +2011,8 @@ export default function SalesOrderWizard() {
       customUnitPrice ? "Manual price override from cart modal" : null,
       rmtFactor,
       rmtUnit,
+      coilNumber,
+      coilSheet,
     );
 
     // cleanup
@@ -3322,6 +3474,35 @@ export default function SalesOrderWizard() {
                                           : cartItem?.unit || "units"}
                                     </span>
                                   </div>
+                                  {(cartItem?.coilNumber ||
+                                    cartItem?.coilSheet) && (
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                      }}
+                                    >
+                                      <span
+                                        style={{
+                                          color: "#64748b",
+                                          fontWeight: "500",
+                                        }}
+                                      >
+                                        Coil no.:
+                                      </span>
+                                      <span
+                                        style={{
+                                          fontWeight: "600",
+                                          color: "#1e293b",
+                                        }}
+                                      >
+                                        {cartItem.coilNumber || "—"}
+                                        {cartItem.coilSheet
+                                          ? ` (${cartItem.coilSheet})`
+                                          : ""}
+                                      </span>
+                                    </div>
+                                  )}
                                   {/* Amount */}
                                   <div
                                     style={{
@@ -5575,6 +5756,7 @@ export default function SalesOrderWizard() {
           setInputQuantity={setInputQuantity}
           inputQuantity={inputQuantity}
           handleQuantityConfirm={handleQuantityConfirm}
+          getCoilOptionsForProduct={getCoilOptionsForProduct}
         />
 
         {/* Toast */}

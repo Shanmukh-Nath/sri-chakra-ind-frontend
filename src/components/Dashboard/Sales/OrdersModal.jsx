@@ -2,7 +2,20 @@ import React from "react";
 
 import styles from "./Sales.module.css";
 import { DialogActionTrigger } from "@/components/ui/dialog";
+
+function formatCoilNumber(item) {
+  const num =
+    item?.coilNumber != null ? String(item.coilNumber).trim() : "";
+  return num || "—";
+}
+
+function formatCoilSheet(item) {
+  const sheet = item?.coilSheet != null ? String(item.coilSheet).trim() : "";
+  return sheet || "—";
+}
+
 function OrdersModal({orderdata}) {
+  const items = Array.isArray(orderdata?.items) ? orderdata.items : [];
   const onSubmit = (e) => e.preventDefault();
 
   let count = 1;
@@ -69,19 +82,25 @@ function OrdersModal({orderdata}) {
               </tr>
             </thead>
             <tbody>
-            {orderdata.items.length === 0 && <tr>
-                <td colSpan={6}>No DATA FOUND</td>
+            {items.length === 0 && <tr>
+                <td colSpan={8}>No DATA FOUND</td>
               </tr>}
-              {orderdata.items.length > 0 && orderdata.items.map((item) => (
-                <tr>
+              {items.length > 0 && items.map((item) => {
+                const qty = Number(item?.quantity ?? item?.qty);
+                const displayQty = Number.isFinite(qty) ? qty : item?.quantity ?? "—";
+                return (
+                <tr key={item.id ?? item.productId ?? count}>
                 <td>{count++}</td>
-                <td>{item.productId}</td>
-                <td>{item.productName}</td>
-                <td>{item.unit}</td>
-                <td>{item.quantity}</td>
-                <td>{item.totalPrice}</td>
+                <td>{item.productId ?? item.SKU}</td>
+                <td>{item.productName || item.name || item.product?.name}</td>
+                <td>{item.unit || item.product?.unit}</td>
+                <td>{displayQty}</td>
+                <td>{formatCoilNumber(item)}</td>
+                <td>{formatCoilSheet(item)}</td>
+                <td>{item.totalPrice ?? item.netAmount}</td>
               </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>
