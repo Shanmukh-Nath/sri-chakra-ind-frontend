@@ -121,8 +121,6 @@ function ViewCoils() {
     <>
       <p className="path">
         <span onClick={() => navigate("/products")}>Products</span>{" "}
-        <i className="bi bi-chevron-right" />{" "}
-        <span onClick={() => navigate("/coils")}>Coils</span>{" "}
         <i className="bi bi-chevron-right" /> View coils
       </p>
 
@@ -131,13 +129,6 @@ function ViewCoils() {
         <div className="d-flex flex-wrap gap-2">
           <button type="button" className={styles.addbtn} onClick={fetchList}>
             Refresh
-          </button>
-          <button
-            type="button"
-            className="cancelbtn"
-            onClick={() => navigate("/coils")}
-          >
-            Back to Coils
           </button>
         </div>
       </div>

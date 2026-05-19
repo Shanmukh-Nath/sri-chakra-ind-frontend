@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
-  CalendarDays,
   FileText,
   PackagePlus,
   Plus,
@@ -13,6 +12,9 @@ import {
 } from "lucide-react";
 import { FaRupeeSign } from "react-icons/fa";
 import { useAuth } from "@/Auth";
+import SuccessModal from "@/components/SuccessModal";
+import ErrorModal from "@/components/ErrorModal";
+import Loading from "@/components/Loading";
 
 const MotionDiv = motion.div;
 
@@ -142,9 +144,24 @@ const styles = {
   searchInput: {
     paddingLeft: "40px",
   },
+  itemHeaderRow: {
+    display: "grid",
+    gridTemplateColumns:
+      "minmax(200px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(100px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 90px 52px",
+    gap: "10px",
+    alignItems: "center",
+    marginBottom: "8px",
+    padding: "0 2px",
+    fontSize: "12px",
+    fontWeight: 700,
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  },
   itemRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(220px, 2fr) repeat(3, minmax(120px, 1fr)) 90px 52px",
+    gridTemplateColumns:
+      "minmax(200px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(100px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 90px 52px",
     gap: "10px",
     alignItems: "center",
     marginBottom: "12px",
@@ -242,6 +259,10 @@ function ManualStockIn({ navigate }) {
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [form, setForm] = useState({
     warehouseId: "",
     supplierName: "",
@@ -253,9 +274,15 @@ function ManualStockIn({ navigate }) {
     reason: "",
     remarks: "",
   });
-  const [items, setItems] = useState([
-    { productId: "", quantity: "", unit: "", unitCost: "" },
-  ]);
+  const emptyItem = () => ({
+    productId: "",
+    quantity: "",
+    unit: "",
+    unitCost: "",
+    coilSheet: "",
+    coilNumber: "",
+  });
+  const [items, setItems] = useState([emptyItem()]);
 
   useEffect(() => {
     async function load() {
@@ -322,7 +349,7 @@ function ManualStockIn({ navigate }) {
   };
 
   const addRow = () => {
-    setItems((prev) => [...prev, { productId: "", quantity: "", unit: "", unitCost: "" }]);
+    setItems((prev) => [...prev, emptyItem()]);
   };
 
   const removeRow = (index) => {
@@ -341,32 +368,99 @@ function ManualStockIn({ navigate }) {
       reason: "",
       remarks: "",
     });
-    setItems([{ productId: "", quantity: "", unit: "", unitCost: "" }]);
+    setItems([emptyItem()]);
     setSearch("");
+  };
+
+  const showError = (message) => {
+    setErrorMessage(message);
+    setIsErrorModalOpen(true);
+  };
+
+  const showSuccess = (message) => {
+    setSuccessMessage(message);
+    setIsSuccessModalOpen(true);
   };
 
   const handleSubmit = async () => {
     if (!form.warehouseId || !form.reason || form.reason.trim().length < 5) {
-      alert("Select warehouse and enter a clear reason with at least 5 characters.");
+      showError(
+        "Select warehouse and enter a clear reason with at least 5 characters.",
+      );
       return;
     }
 
     const cleanItems = items
       .filter((item) => item.productId && item.quantity)
-      .map((item) => ({
-        productId: Number(item.productId),
-        quantity: Number(item.quantity),
-        unit: item.unit || "kg",
-        unitCost: item.unitCost ? Number(item.unitCost) : null,
-      }));
+      .map((item) => {
+        const product = products.find(
+          (entry) => String(entry.id) === String(item.productId),
+        );
+        const payload = {
+          productId: Number(item.productId),
+          quantity: Number(item.quantity),
+          unit: item.unit || "kg",
+          unitCost: item.unitCost ? Number(item.unitCost) : null,
+        };
+        const sheet = item.coilSheet?.trim();
+        const number = item.coilNumber?.trim();
+        if (sheet) payload.coilSheet = sheet;
+        if (number) payload.coilNumber = number;
+        if (product?.SKU) payload.sku = product.SKU;
+        return payload;
+      });
 
     if (!cleanItems.length) {
-      alert("Add at least one valid product line.");
+      showError("Add at least one valid product line.");
+      return;
+    }
+
+    const coilLinesForBatch = cleanItems.filter(
+      (item) => item.coilSheet && item.coilNumber,
+    );
+    const coilLinesPartial = cleanItems.filter(
+      (item) =>
+        (item.coilSheet && !item.coilNumber) ||
+        (!item.coilSheet && item.coilNumber),
+    );
+    if (coilLinesPartial.length) {
+      showError(
+        "Each stock line with coil tracking needs both Coil sheet and Coil number, or leave both empty.",
+      );
       return;
     }
 
     try {
       setLoading(true);
+
+      if (coilLinesForBatch.length > 0) {
+        let storedUser = null;
+        try {
+          const raw = JSON.parse(localStorage.getItem("user") || "null");
+          storedUser = raw?.user || raw;
+        } catch {
+          storedUser = null;
+        }
+        const now = new Date();
+        const indianTime = new Date(
+          now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
+        );
+        await axiosAPI.post("/coils/batch", {
+          recordedDate: form.transactionDate || indianTime.toISOString().slice(0, 10),
+          recordedTime: indianTime.toTimeString().slice(0, 5),
+          employeeId: storedUser?.employeeId ?? null,
+          coils: [
+            {
+              items: coilLinesForBatch.map((item) => ({
+                productId: item.productId,
+                sku: item.sku,
+                coilSheet: item.coilSheet,
+                coilNumber: item.coilNumber,
+              })),
+            },
+          ],
+        });
+      }
 
       await axiosAPI.post("/warehouses/inventory/manual-stock-in", {
         warehouseId: Number(form.warehouseId),
@@ -381,10 +475,16 @@ function ManualStockIn({ navigate }) {
         items: cleanItems,
       });
 
-      alert("Direct stock in recorded successfully.");
+      const coilNote =
+        coilLinesForBatch.length > 0
+          ? ` ${coilLinesForBatch.length} coil line(s) were registered.`
+          : "";
+      showSuccess(`Direct stock in created successfully.${coilNote}`);
       resetForm();
     } catch (error) {
-      alert(error?.response?.data?.message || "Failed to complete direct stock in");
+      showError(
+        error?.response?.data?.message || "Failed to complete direct stock in",
+      );
     } finally {
       setLoading(false);
     }
@@ -464,16 +564,16 @@ function ManualStockIn({ navigate }) {
           </div>
 
           <div style={styles.inputGroup}>
-            <label style={styles.label}>Supplier Invoice Date</label>
-            <div style={{ position: "relative" }}>
-              <CalendarDays size={16} style={{ position: "absolute", right: 14, top: 14, color: "#64748b" }} />
-              <input
-                style={styles.input}
-                type="date"
-                value={form.supplierInvoiceDate}
-                onChange={(e) => updateForm("supplierInvoiceDate", e.target.value)}
-              />
-            </div>
+            <label style={styles.label} htmlFor="supplierInvoiceDate">
+              Supplier Invoice Date
+            </label>
+            <input
+              id="supplierInvoiceDate"
+              style={styles.input}
+              type="date"
+              value={form.supplierInvoiceDate}
+              onChange={(e) => updateForm("supplierInvoiceDate", e.target.value)}
+            />
           </div>
 
           <div style={styles.inputGroup}>
@@ -551,6 +651,17 @@ function ManualStockIn({ navigate }) {
           </div>
         </div>
 
+        <div style={styles.itemHeaderRow}>
+          <span>Product</span>
+          <span>Qty</span>
+          <span>Unit</span>
+          <span>Rate</span>
+          <span>Coil sheet</span>
+          <span>Coil number</span>
+          <span>Line total</span>
+          <span />
+        </div>
+
         {items.map((item, index) => {
           const selectedProduct = products.find(
             (product) => String(product.id) === String(item.productId),
@@ -607,6 +718,20 @@ function ManualStockIn({ navigate }) {
                 placeholder="Rate"
               />
 
+              <input
+                style={styles.input}
+                value={item.coilSheet}
+                onChange={(e) => updateItem(index, "coilSheet", e.target.value)}
+                placeholder="Sheet / spec"
+              />
+
+              <input
+                style={styles.input}
+                value={item.coilNumber}
+                onChange={(e) => updateItem(index, "coilNumber", e.target.value)}
+                placeholder="Coil no."
+              />
+
               <div style={styles.inlineValue}>
                 <FaRupeeSign size={13} />
                 {(
@@ -646,8 +771,23 @@ function ManualStockIn({ navigate }) {
           {loading ? "Saving direct stock in..." : "Confirm Direct Stock In"}
         </button>
       </div>
+
+      {loading && <Loading />}
+
+      <SuccessModal
+        isOpen={isSuccessModalOpen}
+        message={successMessage}
+        onClose={() => setIsSuccessModalOpen(false)}
+      />
+
+      <ErrorModal
+        isOpen={isErrorModalOpen}
+        message={errorMessage}
+        onClose={() => setIsErrorModalOpen(false)}
+      />
     </div>
   );
 }
+
 
 export default ManualStockIn;
