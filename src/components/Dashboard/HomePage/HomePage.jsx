@@ -35,6 +35,12 @@ import {
   extractDailySale,
   mergeDailySale,
 } from "@/utils/dailySaleUtils";
+import {
+  fetchDailySalePricesStatus,
+  formatDisplayDate,
+  getIstDateString,
+} from "@/utils/dailySalePriceUtils";
+import DailySalePriceModal from "./DailySalePriceModal";
 
 /** GET /dashboard/home — backend `dailySale`: IST calendar day, SalesOrderItem.grandTotal sums, excludes Cancelled. */
 const dailySaleInrFormatter = new Intl.NumberFormat("en-IN", {
@@ -119,6 +125,14 @@ function HomePage() {
     setIsModalOpen(false);
   };
   const [successful, setSuccessful] = useState();
+  const [dailySalePrices, setDailySalePrices] = useState({
+    updatedToday: false,
+    lastUpdatedAt: null,
+    lastUpdatedDate: null,
+    summary: { perMetre: 0, perKg: 0, perFeet: 0 },
+    products: [],
+  });
+  const [dailyPriceModalOpen, setDailyPriceModalOpen] = useState(false);
 
   const formData = new FormData();
 
@@ -206,12 +220,18 @@ function HomePage() {
         console.log('HomePage - Final URL built:', url);
         
         const res = await axiosAPI.get(url);
-        const dailySale = await resolveDailySale(
-          axiosAPI,
-          res.data,
-          divisionId,
-          showAllDivisions,
-        );
+        const [dailySale, dailyPrices] = await Promise.all([
+          resolveDailySale(axiosAPI, res.data, divisionId, showAllDivisions),
+          fetchDailySalePricesStatus(axiosAPI, divisionId, showAllDivisions).catch(
+            () => ({
+              updatedToday: false,
+              lastUpdatedDate: null,
+              summary: { perMetre: 0, perKg: 0, perFeet: 0 },
+              products: [],
+            }),
+          ),
+        ]);
+        setDailySalePrices(dailyPrices);
         console.log('HomePage - Backend response:', res.data);
         console.log('HomePage - Daily sale (merged):', dailySale);
         console.log('HomePage - Division context:', {
@@ -274,12 +294,18 @@ function HomePage() {
           console.log('HomePage - Refetch final URL built:', url);
           
           const res = await axiosAPI.get(url);
-          const dailySale = await resolveDailySale(
-            axiosAPI,
-            res.data,
-            divisionId,
-            showAllDivisions,
-          );
+          const [dailySale, dailyPrices] = await Promise.all([
+            resolveDailySale(axiosAPI, res.data, divisionId, showAllDivisions),
+            fetchDailySalePricesStatus(axiosAPI, divisionId, showAllDivisions).catch(
+              () => ({
+                updatedToday: false,
+                lastUpdatedDate: null,
+                summary: { perMetre: 0, perKg: 0, perFeet: 0 },
+                products: [],
+              }),
+            ),
+          ]);
+          setDailySalePrices(dailyPrices);
           console.log('HomePage - Refetch backend response:', res.data);
           console.log('HomePage - Refetch daily sale (merged):', dailySale);
 
@@ -332,11 +358,28 @@ function HomePage() {
   };
 
   const dailySale = dashboardData.dailySale ?? {};
+  const priceSummary = dailySalePrices.summary ?? {};
+  const pricesUpdatedToday = dailySalePrices.updatedToday === true;
   const hasDailySaleData =
     (dailySale.total ?? 0) > 0 ||
     (dailySale.perMetre ?? 0) > 0 ||
     (dailySale.perKg ?? 0) > 0 ||
     (dailySale.perFeet ?? 0) > 0;
+
+  const refreshDailyPrices = async () => {
+    const divisionId = selectedDivision?.id;
+    if (!divisionId) return;
+    try {
+      const dailyPrices = await fetchDailySalePricesStatus(
+        axiosAPI,
+        divisionId,
+        showAllDivisions,
+      );
+      setDailySalePrices(dailyPrices);
+    } catch (e) {
+      console.warn("HomePage - refresh daily prices failed:", e);
+    }
+  };
 
   return (
     <>
@@ -466,28 +509,77 @@ function HomePage() {
           </div>
         </div>
 
-        <div className={`${styles.statCard} ${styles.dailySaleStatCard}`}>
+        <div
+          className={`${styles.statCard} ${styles.dailySaleStatCard} ${styles.dailySaleClickable}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => setDailyPriceModalOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setDailyPriceModalOpen(true);
+            }
+          }}
+          title="Click to update today's product prices"
+        >
           <div className={styles.statIcon}>
             <FaCalendarDay />
           </div>
           <div className={styles.statContent}>
             <h3>{formatDailySaleInr(dailySale.total)}</h3>
             <p>Daily Sale</p>
-            <span className={styles.dailySaleIstHint}>Today (IST) · line totals</span>
-            <div className={styles.dailySaleBreakdown}>
-              <div className={styles.dailySaleRow}>
-                <span>Per / metre</span>
-                <span>{formatDailySaleInr(dailySale.perMetre)}</span>
-              </div>
-              <div className={styles.dailySaleRow}>
-                <span>Per / kg</span>
-                <span>{formatDailySaleInr(dailySale.perKg)}</span>
-              </div>
-              <div className={styles.dailySaleRow}>
-                <span>Per / feet</span>
-                <span>{formatDailySaleInr(dailySale.perFeet)}</span>
-              </div>
-            </div>
+            <span className={styles.dailySaleIstHint}>
+              Today (IST) · click to update prices
+            </span>
+
+            {pricesUpdatedToday ? (
+              <>
+                <span className={styles.dailyPriceUpdatedBadge}>
+                  Prices updated today ({formatDisplayDate(getIstDateString())})
+                </span>
+                <div className={styles.dailySaleBreakdown}>
+                  <div className={styles.dailySaleRow}>
+                    <span>Per / metre</span>
+                    <span>{formatDailySaleInr(priceSummary.perMetre)}</span>
+                  </div>
+                  <div className={styles.dailySaleRow}>
+                    <span>Per / kg</span>
+                    <span>{formatDailySaleInr(priceSummary.perKg)}</span>
+                  </div>
+                  <div className={styles.dailySaleRow}>
+                    <span>Per / feet</span>
+                    <span>{formatDailySaleInr(priceSummary.perFeet)}</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <span className={styles.dailyPriceNotUpdated}>
+                  Prices not updated today
+                </span>
+                <span className={styles.dailyPriceLastUpdated}>
+                  Last updated:{" "}
+                  {dailySalePrices.lastUpdatedDate
+                    ? formatDisplayDate(dailySalePrices.lastUpdatedDate)
+                    : "—"}
+                </span>
+                <div className={styles.dailySaleBreakdown}>
+                  <div className={styles.dailySaleRow}>
+                    <span>Per / metre (sales)</span>
+                    <span>{formatDailySaleInr(dailySale.perMetre)}</span>
+                  </div>
+                  <div className={styles.dailySaleRow}>
+                    <span>Per / kg (sales)</span>
+                    <span>{formatDailySaleInr(dailySale.perKg)}</span>
+                  </div>
+                  <div className={styles.dailySaleRow}>
+                    <span>Per / feet (sales)</span>
+                    <span>{formatDailySaleInr(dailySale.perFeet)}</span>
+                  </div>
+                </div>
+              </>
+            )}
+
           </div>
         </div>
       </div>
@@ -705,6 +797,20 @@ function HomePage() {
       {isModalOpen && (
         <ErrorModal isOpen={isModalOpen} message={error} onClose={closeModal} />
       )}
+
+      <DailySalePriceModal
+        isOpen={dailyPriceModalOpen}
+        onClose={() => setDailyPriceModalOpen(false)}
+        divisionId={selectedDivision?.id}
+        showAllDivisions={showAllDivisions}
+        onSaved={(data) => {
+          if (data) {
+            setDailySalePrices(data);
+          } else {
+            refreshDailyPrices();
+          }
+        }}
+      />
 
       {/* Show skeleton when loading OR when no data is available yet */}
       {(loading ||

@@ -313,7 +313,7 @@ function EditCoilBatch() {
       setShowSuccess(true);
       setTimeout(() => {
         setShowSuccess(false);
-        navigate("/coils/view");
+        navigate("/coils");
       }, 1800);
     } catch (e) {
       setError(errMsg(e));
@@ -332,9 +332,7 @@ function EditCoilBatch() {
       <p className="path">
         <span onClick={() => navigate("/products")}>Products</span>{" "}
         <i className="bi bi-chevron-right" />{" "}
-        <span onClick={() => navigate("/coils")}>Coils</span>{" "}
-        <i className="bi bi-chevron-right" />{" "}
-        <span onClick={() => navigate("/coils/view")}>View coils</span>{" "}
+        <span onClick={() => navigate("/coils")}>View coils</span>{" "}
         <i className="bi bi-chevron-right" /> Edit batch {batchId}
       </p>
 
@@ -584,7 +582,7 @@ function EditCoilBatch() {
               <button
                 type="button"
                 className="cancelbtn"
-                onClick={() => navigate("/coils/view")}
+                onClick={() => navigate("/coils")}
               >
                 Cancel
               </button>

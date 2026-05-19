@@ -1,0 +1,86 @@
+.hint {
+  font-size: 14px;
+  color: #475569;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.search {
+  width: 100%;
+  max-width: 360px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #d7e3ef;
+  font-size: 14px;
+}
+
+.tableWrap {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.table {
+  margin-bottom: 0;
+  font-size: 14px;
+}
+
+.productCell {
+  font-weight: 600;
+  color: #0f172a;
+  min-width: 140px;
+}
+
+.unitList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.unitRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.unitRow .unitBadge {
+  flex: 0 0 52px;
+}
+
+.todayInputWrap {
+  flex: 1;
+  min-width: 120px;
+}
+
+.priceInput {
+  width: 100%;
+  min-width: 100px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #d7e3ef;
+  font-size: 14px;
+}
+
+.catalogPriceCell {
+  font-weight: 600;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.unitBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  text-transform: lowercase;
+}
+
+.prevPrice {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 4px;
+}
