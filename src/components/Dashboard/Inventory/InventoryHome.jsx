@@ -127,6 +127,23 @@ function InventoryHome({ navigate }) {
             >
               <strong>First-time inventory setup:</strong> Set products with one clean stock unit, add selling units with conversion rules, then use `Direct Stock In` for opening or supplier stock. Warehouse stock will stay in one system value while staff can still see it as sheets, coils, or rmt.
             </div>
+            <div
+              style={{
+                marginBottom: "16px",
+                padding: "16px 18px",
+                borderRadius: "18px",
+                background: "linear-gradient(135deg, #eff6ff, #f8fafc)",
+                border: "1px solid #bfdbfe",
+                color: "#1e3a8a",
+                lineHeight: 1.7,
+              }}
+            >
+              <strong>Steel mode:</strong> use <code>Steel Settings</code> to lock
+              the base calculation unit to kg while letting accountants choose
+              display units, then use <code>Coil Ledger</code> and{" "}
+              <code>Production Journal</code> for raw coil, finished sheet, and
+              scrap tracking.
+            </div>
             <button
       className="homebtn"
       onClick={() => navigate("/inventory/direct-stock-in")}
@@ -137,6 +154,9 @@ function InventoryHome({ navigate }) {
             <button className='homebtn' onClick={() => navigate('/inventory/outgoing-stock')}>Outgoing Stock</button>
             <button className='homebtn' onClick={() => navigate('/inventory/current-stock')}>Current Stock</button>
             <button className='homebtn' onClick={() => navigate('/inventory/stock-summary')}>Stock Summary</button>
+            <button className='homebtn' onClick={() => navigate('/inventory/steel-settings')}>Steel Settings</button>
+            <button className='homebtn' onClick={() => navigate('/inventory/coil-ledger')}>Coil Ledger</button>
+            <button className='homebtn' onClick={() => navigate('/inventory/production-journal')}>Production Journal</button>
             <button className='homebtn' onClick={() => navigate('/inventory/damaged-goods')}>Damaged Goods</button>
             <button className='homebtn' onClick={() => navigate('/inventory/manage-stock')}>Stock Adjustment</button>
         </div>

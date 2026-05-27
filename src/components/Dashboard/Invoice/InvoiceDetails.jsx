@@ -148,6 +148,19 @@ const pageStyles = {
     objectFit: "contain",
     padding: "10px",
   },
+  codeBox: {
+    marginTop: "10px",
+    borderRadius: "16px",
+    border: "1px solid #d9e7f7",
+    background: "#f8fbff",
+    padding: "14px",
+    color: "#102542",
+    fontSize: "12px",
+    lineHeight: 1.6,
+    overflowX: "auto",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  },
 };
 
 const emptyEditForm = {
@@ -198,6 +211,12 @@ const formatDocumentType = (value) =>
   String(value || "")
     .replaceAll("_", " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+const formatDateTime = (value) =>
+  value ? String(value).replace("T", " ").slice(0, 19) : "-";
+const formatStatus = (value) =>
+  String(value || "not_configured")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 
 function InvoiceDetails({ navigate }) {
   const { axiosAPI } = useAuth();
@@ -207,6 +226,14 @@ function InvoiceDetails({ navigate }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [eInvoiceSaving, setEInvoiceSaving] = useState(false);
+  const [governmentAction, setGovernmentAction] = useState("");
+  const [gstLookupLoading, setGstLookupLoading] = useState(false);
+  const [gstLookupResult, setGstLookupResult] = useState(null);
+  const [governmentStatus, setGovernmentStatus] = useState(null);
+  const [cancelForm, setCancelForm] = useState({
+    cancelReason: "1",
+    cancelRemarks: "",
+  });
   const [editing, setEditing] = useState(location.search.includes("mode=edit"));
   const [form, setForm] = useState(emptyEditForm);
 
@@ -322,6 +349,11 @@ function InvoiceDetails({ navigate }) {
   const documentStatus = detail.status || "Finalized";
   const canPrepareEInvoice = Boolean(invoice?.availableDocumentActions?.canPrepareEInvoice);
   const isEInvoiceView = selectedDocumentType === "e_invoice";
+  const complianceDetails = detail.complianceDetails || {};
+  const gstProviderConfig = detail.billingProfile?.settings?.gstCompliance || {};
+  const gstProviderName =
+    complianceDetails.gstProvider || gstProviderConfig.provider || "not_configured";
+  const eWayBillLifecycle = complianceDetails.eWayBillLifecycle || {};
 
   const previewTotal = useMemo(() => {
     const charges = form.chargesSummary;
@@ -392,6 +424,114 @@ function InvoiceDetails({ navigate }) {
       alert(error?.response?.data?.message || "Failed to save e-invoice compliance");
     } finally {
       setEInvoiceSaving(false);
+    }
+  };
+
+  const handleGstinLookup = async () => {
+    const gstin = String(form.buyer.gstin || detail.buyerSnapshot?.gstin || "").trim();
+    if (gstin.length !== 15) {
+      alert("Buyer GSTIN must be a valid 15-character value.");
+      return;
+    }
+
+    try {
+      setGstLookupLoading(true);
+      const res = await axiosAPI.post("/invoice/billing/gstin/lookup", {
+        gstin,
+        billingProfileId: detail.billingProfile?.id,
+      });
+      setGstLookupResult(res.data);
+      alert("GSTIN details fetched successfully");
+    } catch (error) {
+      alert(error?.response?.data?.message || "Failed to fetch GSTIN details");
+    } finally {
+      setGstLookupLoading(false);
+    }
+  };
+
+  const handleGovernmentEInvoice = async () => {
+    try {
+      setGovernmentAction("einvoice");
+      const res = await axiosAPI.post(
+        `/invoice/billing/${invoiceId}/e-invoice/generate`,
+        {
+          options: {
+            buyerGstinVerified: Boolean(gstLookupResult?.data),
+          },
+        },
+      );
+      setInvoice(res.data?.invoice || invoice);
+      await loadInvoice();
+      alert("Government e-invoice generated successfully");
+    } catch (error) {
+      alert(error?.response?.data?.message || "Failed to generate e-invoice");
+    } finally {
+      setGovernmentAction("");
+    }
+  };
+
+  const handleCancelGovernmentEInvoice = async () => {
+    if (!String(form.complianceDetails.irnNumber || complianceDetails.irnNumber || "").trim()) {
+      alert("IRN number is required before cancellation.");
+      return;
+    }
+
+    try {
+      setGovernmentAction("cancel-einvoice");
+      const res = await axiosAPI.post(
+        `/invoice/billing/${invoiceId}/e-invoice/cancel`,
+        {
+          irnNumber: form.complianceDetails.irnNumber || complianceDetails.irnNumber,
+          cancelReason: cancelForm.cancelReason,
+          cancelRemarks: cancelForm.cancelRemarks,
+        },
+      );
+      setInvoice(res.data?.invoice || invoice);
+      await loadInvoice();
+      alert("Government e-invoice cancelled successfully");
+    } catch (error) {
+      alert(error?.response?.data?.message || "Failed to cancel e-invoice");
+    } finally {
+      setGovernmentAction("");
+    }
+  };
+
+  const handleGenerateEWayBill = async () => {
+    try {
+      setGovernmentAction("ewaybill");
+      const res = await axiosAPI.post(
+        `/invoice/billing/${invoiceId}/e-way-bill/generate`,
+        {
+          eWayBill: {
+            vehicleNumber: form.transportDetails.vehicleNumber,
+            lrNumber: form.transportDetails.lrNumber,
+            transporterName: form.transportDetails.transporterName,
+            transporterId: form.transportDetails.transporterId,
+          },
+        },
+      );
+      setInvoice(res.data?.invoice || invoice);
+      await loadInvoice();
+      alert("Government e-way bill generated successfully");
+    } catch (error) {
+      alert(error?.response?.data?.message || "Failed to generate e-way bill");
+    } finally {
+      setGovernmentAction("");
+    }
+  };
+
+  const handleSyncGovernmentStatus = async () => {
+    try {
+      setGovernmentAction("status");
+      const res = await axiosAPI.get(
+        `/invoice/billing/${invoiceId}/gst-compliance/status`,
+      );
+      setGovernmentStatus(res.data);
+      alert("Compliance status fetched successfully");
+    } catch (error) {
+      alert(error?.response?.data?.message || "Failed to fetch compliance status");
+    } finally {
+      setGovernmentAction("");
     }
   };
 
@@ -718,6 +858,177 @@ function InvoiceDetails({ navigate }) {
                 >
                   {eInvoiceSaving ? "Saving..." : "Issue E-Invoice"}
                 </button>
+              </div>
+
+              <div
+                style={{
+                  marginTop: "20px",
+                  paddingTop: "20px",
+                  borderTop: "1px solid #d9e7f7",
+                }}
+              >
+                <h4 style={{ ...pageStyles.sectionTitle, fontSize: "16px" }}>
+                  Government / GSP Actions
+                </h4>
+                <div style={pageStyles.grid}>
+                  <div>
+                    <div style={pageStyles.label}>Configured Provider</div>
+                    <div style={pageStyles.value}>{formatStatus(gstProviderName)}</div>
+                  </div>
+                  <div>
+                    <div style={pageStyles.label}>Configured Base URL</div>
+                    <div style={pageStyles.value}>{gstProviderConfig.baseUrl || "-"}</div>
+                  </div>
+                  <div>
+                    <div style={pageStyles.label}>Government E-Invoice Status</div>
+                    <div style={pageStyles.value}>
+                      {formatStatus(
+                        complianceDetails.eInvoiceLifecycle?.status ||
+                          eInvoiceLifecycle.status,
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={pageStyles.label}>Government E-Way Bill Status</div>
+                    <div style={pageStyles.value}>
+                      {formatStatus(eWayBillLifecycle.status)}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ ...pageStyles.grid, marginTop: "16px" }}>
+                  <div style={pageStyles.field}>
+                    <label style={pageStyles.label}>Buyer GSTIN Validation</label>
+                    <input
+                      style={pageStyles.input}
+                      value={form.buyer.gstin}
+                      onChange={(e) => updateNested("buyer", "gstin", e.target.value)}
+                    />
+                  </div>
+                  <div style={pageStyles.field}>
+                    <label style={pageStyles.label}>IRN Cancellation Reason Code</label>
+                    <select
+                      style={pageStyles.input}
+                      value={cancelForm.cancelReason}
+                      onChange={(e) =>
+                        setCancelForm((prev) => ({
+                          ...prev,
+                          cancelReason: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="1">Duplicate</option>
+                      <option value="2">Data Entry Mistake</option>
+                      <option value="3">Order Cancelled</option>
+                      <option value="4">Other</option>
+                    </select>
+                  </div>
+                  <div style={pageStyles.field}>
+                    <label style={pageStyles.label}>IRN Cancellation Remarks</label>
+                    <input
+                      style={pageStyles.input}
+                      value={cancelForm.cancelRemarks}
+                      onChange={(e) =>
+                        setCancelForm((prev) => ({
+                          ...prev,
+                          cancelRemarks: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div style={{ ...pageStyles.actions, marginTop: "16px" }}>
+                  <button
+                    style={{ ...pageStyles.button, ...pageStyles.secondaryButton }}
+                    disabled={gstLookupLoading || gstProviderName === "not_configured"}
+                    onClick={handleGstinLookup}
+                  >
+                    {gstLookupLoading ? "Fetching GSTIN..." : "Fetch GSTIN Details"}
+                  </button>
+                  <button
+                    style={{ ...pageStyles.button, ...pageStyles.primaryButton }}
+                    disabled={governmentAction !== "" || gstProviderName === "not_configured"}
+                    onClick={handleGovernmentEInvoice}
+                  >
+                    {governmentAction === "einvoice"
+                      ? "Generating IRN..."
+                      : "Generate IRN From Govt"}
+                  </button>
+                  <button
+                    style={{ ...pageStyles.button, ...pageStyles.accentButton }}
+                    disabled={governmentAction !== "" || gstProviderName === "not_configured"}
+                    onClick={handleGenerateEWayBill}
+                  >
+                    {governmentAction === "ewaybill"
+                      ? "Generating E-Way Bill..."
+                      : "Generate E-Way Bill"}
+                  </button>
+                  <button
+                    style={{ ...pageStyles.button, ...pageStyles.secondaryButton }}
+                    disabled={governmentAction !== "" || gstProviderName === "not_configured"}
+                    onClick={handleSyncGovernmentStatus}
+                  >
+                    {governmentAction === "status"
+                      ? "Checking Status..."
+                      : "Sync Govt Status"}
+                  </button>
+                  <button
+                    style={{ ...pageStyles.button, ...pageStyles.secondaryButton }}
+                    disabled={governmentAction !== "" || gstProviderName === "not_configured"}
+                    onClick={handleCancelGovernmentEInvoice}
+                  >
+                    {governmentAction === "cancel-einvoice"
+                      ? "Cancelling IRN..."
+                      : "Cancel IRN"}
+                  </button>
+                </div>
+
+                {gstLookupResult && (
+                  <div style={{ marginTop: "16px" }}>
+                    <div style={pageStyles.label}>GSTIN Lookup Result</div>
+                    <div style={pageStyles.codeBox}>
+                      {JSON.stringify(gstLookupResult.data || gstLookupResult, null, 2)}
+                    </div>
+                  </div>
+                )}
+
+                {governmentStatus && (
+                  <div style={{ marginTop: "16px" }}>
+                    <div style={pageStyles.label}>
+                      Latest Compliance Status From {formatStatus(governmentStatus.provider)}
+                    </div>
+                    <div style={pageStyles.value}>
+                      Synced at {formatDateTime(new Date().toISOString())}
+                    </div>
+                    <div style={pageStyles.codeBox}>
+                      {JSON.stringify(governmentStatus.status || governmentStatus, null, 2)}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ ...pageStyles.grid, marginTop: "16px" }}>
+                  <div>
+                    <div style={pageStyles.label}>IRN</div>
+                    <div style={pageStyles.value}>{complianceDetails.irnNumber || "-"}</div>
+                  </div>
+                  <div>
+                    <div style={pageStyles.label}>Ack Number</div>
+                    <div style={pageStyles.value}>{complianceDetails.ackNumber || "-"}</div>
+                  </div>
+                  <div>
+                    <div style={pageStyles.label}>Ack Date</div>
+                    <div style={pageStyles.value}>
+                      {formatDateTime(complianceDetails.ackDate)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={pageStyles.label}>E-Way Bill Number</div>
+                    <div style={pageStyles.value}>
+                      {complianceDetails.eWayBillNumber || "-"}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
